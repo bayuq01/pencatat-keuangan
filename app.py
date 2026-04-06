@@ -35,15 +35,27 @@ def simpan_data_batch(df_baru):
     else:
         df_baru.to_csv(NAMA_FILE, mode='a', header=False, index=False)
 
-def analisa_nota_dengan_gemini(gambar):
+def analisa_dokumen_dengan_gemini(gambar):
     try:
-        instruksi = "Analisa nota ini, ekstrak barang ke JSON: [{'Nama_Barang': 'X', 'Harga_Satuan': 0, 'Qty': 1, 'Total_Harga': 0}]"
+        # INSTRUKSI AI YANG LEBIH LUAS (Bisa baca Nota & Bukti Transfer)
+        instruksi = """
+        Tolong analisa gambar ini (bisa berupa nota belanja atau bukti transfer bank).
+        Ekstrak informasi pentingnya ke dalam format JSON Array.
+        1. Jika NOTA: Ambil daftar barang, harga satuan, dan qty.
+        2. Jika BUKTI TRANSFER: Ambil nominal total, nama pengirim/penerima sebagai 'Nama_Barang', dan tambahkan catatan di 'Keterangan'.
+        
+        Format yang diminta harus persis seperti ini:
+        [
+          {"Nama_Barang": "Nama Item / Nama Pengirim", "Harga_Satuan": 1000, "Qty": 1, "Total_Harga": 1000, "Keterangan": "Catatan tambahan jika ada"}
+        ]
+        Hanya berikan JSON mentah saja.
+        """
         response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
         return json.loads(response.text.replace('```json', '').replace('```', '').strip())
     except: return []
 
-# --- TAMPILAN UTAMA (DASHBOARD) ---
-st.title("Monitor Keuangan v2.0 📊")
+# --- TAMPILAN UTAMA ---
+st.title("Monitor Keuangan v2.5 📊")
 
 total_masuk, total_keluar, saldo = hitung_ringkasan()
 c1, c2, c3 = st.columns(3)
@@ -52,95 +64,79 @@ c2.metric("Total Uang Keluar", f"Rp {total_keluar:,}")
 c3.metric("Saldo Akhir", f"Rp {saldo:,}")
 st.markdown("---")
 
-# --- AREA BACKUP CLEAN (POSISI BARU) ---
+# --- AREA BACKUP ---
 col_down, col_up = st.columns(2)
-
 with col_down:
     if os.path.exists(NAMA_FILE):
-        df_download = pd.read_csv(NAMA_FILE)
-        csv_data = df_download.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Backup",
-            data=csv_data,
-            file_name=f"backup_keuangan_{date.today()}.csv",
-            mime='text/csv',
-            use_container_width=True
-        )
+        df_dl = pd.read_csv(NAMA_FILE)
+        csv = df_dl.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Backup", data=csv, file_name=f"backup_{date.today()}.csv", use_container_width=True)
     else:
-        # Tombol redup jika belum ada data, agar UI tetap seimbang
-        st.download_button(label="📥 Download Backup (Data Kosong)", data="", disabled=True, use_container_width=True)
-
+        st.download_button("📥 Download Backup (Kosong)", data="", disabled=True, use_container_width=True)
 with col_up:
-    file_backup = st.file_uploader("Upload Backup", type=['csv'], label_visibility="collapsed")
-    if file_backup is not None:
-        df_restored = pd.read_csv(file_backup)
-        df_restored.to_csv(NAMA_FILE, index=False)
-        st.rerun() # Langsung refresh otomatis agar clean
+    file_up = st.file_uploader("Upload Backup", type=['csv'], label_visibility="collapsed")
+    if file_up:
+        pd.read_csv(file_up).to_csv(NAMA_FILE, index=False)
+        st.rerun()
 
 st.markdown("---")
 
-# --- AREA INPUT TRANSAKSI ---
-metode = st.radio("Pilih Metode Pencatatan:", ["✍️ Input Manual", "📸 Scan Nota AI"], horizontal=True)
+# --- INPUT TRANSAKSI ---
+metode = st.radio("Metode Pencatatan:", ["✍️ Manual", "📸 Scan AI"], horizontal=True)
 
-if metode == "✍️ Input Manual":
+if metode == "✍️ Manual":
     col1, col2 = st.columns(2)
     with col1:
-        tgl = st.date_input("Tanggal Transaksi", date.today())
-        tipe = st.radio("Tipe Transaksi", ["Uang Keluar", "Uang Masuk"], horizontal=True)
-        
-        if tipe == "Uang Masuk":
-            opsi_kat = ["Gaji", "Pendapatan Ojol", "Lain-lain"]
-        else:
-            opsi_kat = ["Makan & Minum", "Transport/Bensin", "Belanja", "Bayar Tagihan", "Cicilan", "Lain-lain"]
+        tgl = st.date_input("Tanggal", date.today())
+        tipe = st.radio("Tipe", ["Uang Keluar", "Uang Masuk"], horizontal=True)
+        opsi_kat = ["Gaji", "Pendapatan Ojol", "Lain-lain"] if tipe == "Uang Masuk" else ["Makan", "Transport", "Belanja", "Tagihan", "Lain-lain"]
         kat = st.selectbox("Kategori", opsi_kat)
-        
     with col2:
-        nama = st.text_input("Keterangan/Nama Barang")
-        
+        nama = st.text_input("Nama/Keterangan")
         if tipe == "Uang Masuk":
-            harga = st.number_input("Nominal (Rp)", min_value=0, step=1000)
-            qty = 1 
+            harga, qty = st.number_input("Nominal", min_value=0, step=1000), 1
         else:
-            harga = st.number_input("Harga Satuan (Rp)", min_value=0, step=1000)
-            qty = st.number_input("Jumlah (Qty)", min_value=1, step=1)
-    
-    if st.button("💾 Simpan Transaksi"):
+            harga = st.number_input("Harga Satuan", min_value=0, step=1000)
+            qty = st.number_input("Qty", min_value=1, step=1)
+    if st.button("💾 Simpan Manual"):
         if nama and harga > 0:
-            df = pd.DataFrame({
-                "Tanggal": [tgl], "Tipe": [tipe], "Kategori": [kat],
-                "Nama_Barang": [nama], "Harga_Satuan": [harga],
-                "Qty": [qty], "Total_Harga": [harga * qty]
-            })
+            df = pd.DataFrame({"Tanggal": [tgl], "Tipe": [tipe], "Kategori": [kat], "Nama_Barang": [nama], "Harga_Satuan": [harga], "Qty": [qty], "Total_Harga": [harga * qty]})
             simpan_data_batch(df)
-            st.rerun() # Dibuat langsung rerun agar notifikasi tidak nyangkut
+            st.rerun()
 
 else:
-    if API_KEY == "PASTE_API_KEY_KAMU_DI_SINI":
-        st.error("⚠️ Masukkan API Key di baris 14 kode Python-mu!")
-        st.stop()
-        
-    upload = st.file_uploader("Upload Foto Nota", type=['jpg', 'jpeg', 'png'])
+    # --- SCAN AI YANG DIPERBARUI ---
+    upload = st.file_uploader("Upload Nota / Bukti Transfer", type=['jpg', 'jpeg', 'png'])
     if upload:
         img = Image.open(upload)
         st.image(img, width=250)
-        if st.button("Mulai Analisa AI"):
-            hasil = analisa_nota_dengan_gemini(img)
-            st.session_state['scan'] = hasil
+        if st.button("🔍 Analisa Dokumen"):
+            st.session_state['scan_pro'] = analisa_dokumen_dengan_gemini(img)
         
-        if 'scan' in st.session_state:
-            df_scan = pd.DataFrame(st.session_state['scan'])
-            edited = st.data_editor(df_scan, num_rows="dynamic", hide_index=True)
-            if st.button("Simpan Hasil Scan"):
+        if 'scan_pro' in st.session_state:
+            st.markdown("### Hasil Analisa AI")
+            col_t, col_k = st.columns(2)
+            with col_t:
+                tipe_scan = st.radio("Tentukan Tipe Transaksi:", ["Uang Keluar", "Uang Masuk"], horizontal=True)
+            with col_k:
+                kat_scan = st.selectbox("Kategori Hasil Scan:", ["Belanja", "Gaji", "Transfer Masuk", "Makan", "Lain-lain"])
+            
+            # Tabel yang bisa diedit termasuk kolom Keterangan
+            df_scan = pd.DataFrame(st.session_state['scan_pro'])
+            edited = st.data_editor(df_scan, num_rows="dynamic", hide_index=True, use_container_width=True)
+            
+            if st.button("💾 Simpan Hasil Scan"):
                 edited['Total_Harga'] = edited['Harga_Satuan'] * edited['Qty']
-                edited.insert(0, 'Kategori', "Belanja (Dari Nota)")
-                edited.insert(0, 'Tipe', 'Uang Keluar')
+                edited.insert(0, 'Kategori', kat_scan)
+                edited.insert(0, 'Tipe', tipe_scan)
                 edited.insert(0, 'Tanggal', date.today())
                 simpan_data_batch(edited)
-                st.session_state.pop('scan', None) 
+                st.session_state.pop('scan_pro', None)
+                st.success("Berhasil disimpan!")
                 st.rerun()
 
-# --- TAMPILAN DATA BAWAH ---
+# --- RIWAYAT ---
 if os.path.exists(NAMA_FILE):
     st.markdown("---")
-    st.subheader("Riwayat Transaksi Terakhir")
+    st.subheader("10 Transaksi Terakhir")
     st.dataframe(pd.read_csv(NAMA_FILE).tail(10), use_container_width=True)
