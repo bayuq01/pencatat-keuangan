@@ -7,14 +7,12 @@ from google import genai
 import json
 
 # ==========================================
-# 1. PENGATURAN API GEMINI (VERSI HYBRID: LOKAL & CLOUD)
+# 1. PENGATURAN API GEMINI 
 # ==========================================
 try:
-    # Ini akan jalan otomatis saat di-online-kan ke Streamlit Cloud
     API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
-    # Ini akan jalan saat kamu ngetes di laptop (Lokal)
-    API_KEY = "AIzaSyDzbfRVjMvOGv_745egmud_80rN4siNj58" 
+    API_KEY = "PASTE_API_KEY_KAMU_DI_SINI" 
 
 client = genai.Client(api_key=API_KEY)
 NAMA_FILE = "catatan_detail_keuangan.csv"
@@ -44,7 +42,7 @@ def analisa_nota_dengan_gemini(gambar):
         return json.loads(response.text.replace('```json', '').replace('```', '').strip())
     except: return []
 
-# --- TAMPILAN UTAMA ---
+# --- TAMPILAN UTAMA (DASHBOARD) ---
 st.title("Monitor Keuangan v2.0 📊")
 
 total_masuk, total_keluar, saldo = hitung_ringkasan()
@@ -54,11 +52,37 @@ c2.metric("Total Uang Keluar", f"Rp {total_keluar:,}")
 c3.metric("Saldo Akhir", f"Rp {saldo:,}")
 st.markdown("---")
 
-metode = st.radio("Pilih Metode Pencatatan:", ["✍️ Input Manual", "📸 Scan Nota AI"], horizontal=True)
+# --- AREA BACKUP CLEAN (POSISI BARU) ---
+col_down, col_up = st.columns(2)
+
+with col_down:
+    if os.path.exists(NAMA_FILE):
+        df_download = pd.read_csv(NAMA_FILE)
+        csv_data = df_download.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Backup",
+            data=csv_data,
+            file_name=f"backup_keuangan_{date.today()}.csv",
+            mime='text/csv',
+            use_container_width=True
+        )
+    else:
+        # Tombol redup jika belum ada data, agar UI tetap seimbang
+        st.download_button(label="📥 Download Backup (Data Kosong)", data="", disabled=True, use_container_width=True)
+
+with col_up:
+    file_backup = st.file_uploader("Upload Backup", type=['csv'], label_visibility="collapsed")
+    if file_backup is not None:
+        df_restored = pd.read_csv(file_backup)
+        df_restored.to_csv(NAMA_FILE, index=False)
+        st.rerun() # Langsung refresh otomatis agar clean
+
 st.markdown("---")
 
+# --- AREA INPUT TRANSAKSI ---
+metode = st.radio("Pilih Metode Pencatatan:", ["✍️ Input Manual", "📸 Scan Nota AI"], horizontal=True)
+
 if metode == "✍️ Input Manual":
-    st.subheader("Pencatatan Manual")
     col1, col2 = st.columns(2)
     with col1:
         tgl = st.date_input("Tanggal Transaksi", date.today())
@@ -88,18 +112,14 @@ if metode == "✍️ Input Manual":
                 "Qty": [qty], "Total_Harga": [harga * qty]
             })
             simpan_data_batch(df)
-            st.success(f"Data {tipe} berhasil disimpan!")
-            st.rerun()
-        else:
-            st.error("Mohon isi keterangan dan nominalnya!")
+            st.rerun() # Dibuat langsung rerun agar notifikasi tidak nyangkut
 
 else:
-    st.subheader("Scan Nota dengan Gemini AI")
     if API_KEY == "PASTE_API_KEY_KAMU_DI_SINI":
         st.error("⚠️ Masukkan API Key di baris 14 kode Python-mu!")
         st.stop()
         
-    upload = st.file_uploader("Upload Foto", type=['jpg', 'jpeg', 'png'])
+    upload = st.file_uploader("Upload Foto Nota", type=['jpg', 'jpeg', 'png'])
     if upload:
         img = Image.open(upload)
         st.image(img, width=250)
@@ -116,39 +136,10 @@ else:
                 edited.insert(0, 'Tipe', 'Uang Keluar')
                 edited.insert(0, 'Tanggal', date.today())
                 simpan_data_batch(edited)
-                st.success("Nota Berhasil Dicatat!")
-                st.session_state.pop('scan', None) # Bersihkan memori scan setelah disimpan
+                st.session_state.pop('scan', None) 
                 st.rerun()
 
-# --- AREA BACKUP DATA (FITUR PENYELAMAT) ---
-st.markdown("---")
-st.subheader("⚙️ Pengaturan & Backup Data")
-col_down, col_up = st.columns(2)
-
-if os.path.exists(NAMA_FILE):
-    df_download = pd.read_csv(NAMA_FILE)
-    csv_data = df_download.to_csv(index=False).encode('utf-8')
-    
-    with col_down:
-        st.info("Download data ke HP/Laptop sebelum server reset.")
-        st.download_button(
-            label="📥 Download Backup CSV",
-            data=csv_data,
-            file_name=f"backup_keuangan_{date.today()}.csv",
-            mime='text/csv',
-        )
-
-with col_up:
-    st.info("Upload file CSV lama jika data hilang.")
-    file_backup = st.file_uploader("📤 Restore dari Backup", type=['csv'], label_visibility="collapsed")
-    if file_backup is not None:
-        df_restored = pd.read_csv(file_backup)
-        df_restored.to_csv(NAMA_FILE, index=False)
-        st.success("Data berhasil dipulihkan! Refresh halaman ini.")
-        if st.button("🔄 Refresh Data"):
-            st.rerun()
-
-# --- TAMPILAN DATA ---
+# --- TAMPILAN DATA BAWAH ---
 if os.path.exists(NAMA_FILE):
     st.markdown("---")
     st.subheader("Riwayat Transaksi Terakhir")
