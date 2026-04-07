@@ -31,21 +31,43 @@ def ambil_data():
         # Jika sheet masih kosong, buat DataFrame baru dengan 8 kolom sesuai rancanganmu
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
-# --- LOGIKA AI HYBRID ---
+# --- FUNGSI AI TERBARU (ANTI-GAGAL) ---
 def analisa_ai(gambar):
     with st.spinner("AI sedang mengenali dokumen..."):
         try:
+            # Gunakan model 1.5-flash yang lebih stabil untuk ekstraksi data
             instruksi = """
-            Analisa gambar ini (Nota atau Bukti Transfer).
-            1. Jika NOTA: Ekstrak tiap barang (Nama_Barang, Harga_Satuan, Qty).
-            2. Jika TRANSFER/QRIS: Ekstrak Nama Toko/Penerima (Nama_Barang) dan Total (Harga_Satuan) dengan Qty 1.
-            Keluarkan format JSON Array saja: [{"Nama_Barang": "X", "Harga_Satuan": 1000, "Qty": 1}]
+            Tolong analisa gambar ini (Nota atau Bukti Transfer).
+            EKSTRAK DATA HANYA DALAM FORMAT JSON ARRAY:
+            [{"Nama_Barang": "Nama", "Harga_Satuan": 1000, "Qty": 1}]
+            
+            PENTING: JANGAN BERIKAN TEKS PENJELASAN APAPUN. LANGSUNG JSON SAJA.
             """
-            response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
-            hasil_teks = response.text.replace('```json', '').replace('```', '').strip()
-            return json.loads(hasil_teks)
+            # Kita ganti model ke 1.5-flash untuk kestabilan lebih tinggi
+            response = client.models.generate_content(model='gemini-1.5-flash', contents=[instruksi, gambar])
+            
+            raw_text = response.text.strip()
+            
+            # --- TEKNIK PEMBERSIHAN (CLEANER) ---
+            # Jika AI membungkus dengan ```json ... ```, kita ambil tengahnya saja
+            if "```json" in raw_text:
+                raw_text = raw_text.split("```json")[1].split("```")[0]
+            elif "```" in raw_text:
+                raw_text = raw_text.split("```")[1].split("```")[0]
+            
+            # Menghapus karakter aneh yang mungkin muncul di awal/akhir
+            raw_text = raw_text.strip()
+            
+            # Jika masih gagal, tampilkan teks aslinya agar kita bisa debug
+            try:
+                return json.loads(raw_text)
+            except:
+                st.warning("AI memberikan format yang tidak biasa. Ini isi teksnya:")
+                st.code(raw_text) # Menampilkan teks asli untuk kita pelajari
+                return None
+                
         except Exception as e:
-            st.error(f"AI gagal membaca: {e}")
+            st.error(f"Koneksi ke AI terputus atau API Key bermasalah: {e}")
             return None
 
 # ==========================================
