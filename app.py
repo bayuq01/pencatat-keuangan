@@ -31,11 +31,14 @@ def ambil_data():
         # Jika sheet masih kosong, buat DataFrame baru dengan 8 kolom sesuai rancanganmu
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
-# --- FUNGSI AI TERBARU (ANTI-GAGAL) ---
+# --- FUNGSI AI TERBARU (FIX 404 & ANTI-GAGAL) ---
 def analisa_ai(gambar):
     with st.spinner("AI sedang mengenali dokumen..."):
         try:
-            # Gunakan model 1.5-flash yang lebih stabil untuk ekstraksi data
+            # Gunakan nama model yang paling standar
+            # Jika 1.5-flash tetap 404, ganti menjadi 'gemini-2.0-flash'
+            MODEL_NAME = 'gemini-1.5-flash' 
+            
             instruksi = """
             Tolong analisa gambar ini (Nota atau Bukti Transfer).
             EKSTRAK DATA HANYA DALAM FORMAT JSON ARRAY:
@@ -43,31 +46,35 @@ def analisa_ai(gambar):
             
             PENTING: JANGAN BERIKAN TEKS PENJELASAN APAPUN. LANGSUNG JSON SAJA.
             """
-            # Kita ganti model ke 1.5-flash untuk kestabilan lebih tinggi
-            response = client.models.generate_content(model='gemini-1.5-flash', contents=[instruksi, gambar])
+            
+            response = client.models.generate_content(
+                model=MODEL_NAME, 
+                contents=[instruksi, gambar]
+            )
             
             raw_text = response.text.strip()
             
-            # --- TEKNIK PEMBERSIHAN (CLEANER) ---
-            # Jika AI membungkus dengan ```json ... ```, kita ambil tengahnya saja
+            # --- CLEANER (Pembersih Teks) ---
             if "```json" in raw_text:
                 raw_text = raw_text.split("```json")[1].split("```")[0]
             elif "```" in raw_text:
                 raw_text = raw_text.split("```")[1].split("```")[0]
             
-            # Menghapus karakter aneh yang mungkin muncul di awal/akhir
             raw_text = raw_text.strip()
             
-            # Jika masih gagal, tampilkan teks aslinya agar kita bisa debug
             try:
                 return json.loads(raw_text)
             except:
-                st.warning("AI memberikan format yang tidak biasa. Ini isi teksnya:")
-                st.code(raw_text) # Menampilkan teks asli untuk kita pelajari
+                st.warning("AI memberikan format teks biasa. Mencoba memproses...")
+                st.code(raw_text)
                 return None
                 
         except Exception as e:
-            st.error(f"Koneksi ke AI terputus atau API Key bermasalah: {e}")
+            # Jika masih error 404, kita beri saran otomatis di layar
+            if "404" in str(e):
+                st.error("⚠️ Model AI tidak ditemukan. Coba ganti MODEL_NAME di kode menjadi 'gemini-2.0-flash' atau 'gemini-1.5-flash-latest'.")
+            else:
+                st.error(f"Terjadi kendala teknis: {e}")
             return None
 
 # ==========================================
