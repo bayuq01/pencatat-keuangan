@@ -1,96 +1,80 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import os
 from datetime import date
 from PIL import Image
 from google import genai
 import json
 
 # ==========================================
-# 1. PENGATURAN API GEMINI 
+# 1. KONFIGURASI API & KONEKSI
 # ==========================================
+st.set_page_config(page_title="Monitor Keuangan Pro v5.0", layout="wide")
+
+# Ambil API Key Gemini dari Secrets
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
+    client = genai.Client(api_key=API_KEY)
 except:
-    API_KEY = "PASTE_API_KEY_KAMU_DI_SINI" 
+    st.error("⚠️ API Key Gemini tidak ditemukan di Secrets!")
+    st.stop()
 
-client = genai.Client(api_key=API_KEY)
-NAMA_FILE = "catatan_detail_keuangan.csv"
+# Buat Koneksi ke Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-st.set_page_config(page_title="Monitor Keuanganku Pro", layout="wide")
+# Fungsi untuk mengambil data terbaru dari Sheets
+def ambil_data():
+    try:
+        # Mengambil data dari sheet pertama (index 0)
+        return conn.read(ttl="0") # ttl="0" artinya data selalu fresh, tidak nyangkut di cache
+    except:
+        # Jika sheet masih kosong, buat DataFrame baru dengan 8 kolom sesuai rancanganmu
+        return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
-# --- FUNGSI DATA ---
-def hitung_ringkasan():
-    if os.path.exists(NAMA_FILE):
-        df = pd.read_csv(NAMA_FILE)
-        if 'Tipe' in df.columns and 'Total_Harga' in df.columns:
-            masuk = df[df['Tipe'] == 'Uang Masuk']['Total_Harga'].sum()
-            keluar = df[df['Tipe'] == 'Uang Keluar']['Total_Harga'].sum()
-            return (masuk, keluar, masuk - keluar)
-    return (0, 0, 0)
-
-def simpan_data_batch(df_baru):
-    # Kolom standar 8 sesuai rancanganmu
-    kolom_standar = ['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan']
-    
-    # Pastikan semua kolom ada, jika tidak ada isi dengan default
-    for col in kolom_standar:
-        if col not in df_baru.columns:
-            df_baru[col] = "" if col == 'Catatan' or col == 'Nama_Barang' else 0
-            
-    df_baru = df_baru[kolom_standar]
-    
-    if not os.path.exists(NAMA_FILE):
-        df_baru.to_csv(NAMA_FILE, index=False)
-    else:
-        df_baru.to_csv(NAMA_FILE, mode='a', header=False, index=False)
-
-def analisa_dokumen_dengan_gemini(gambar):
-    with st.spinner("AI sedang membaca dokumen..."):
+# --- LOGIKA AI HYBRID ---
+def analisa_ai(gambar):
+    with st.spinner("AI sedang mengenali dokumen..."):
         try:
             instruksi = """
-            Analisa gambar ini (nota/transfer). 
-            Ekstrak ke JSON:
-            1. Nama pengirim/penerima/toko -> 'Nama_Barang'
-            2. Harga Satuan -> 'Harga_Satuan'
-            3. Jumlah -> 'Qty' (default 1 jika bukti transfer)
-            
-            Berikan format JSON Array saja:
-            [{"Nama_Barang": "X", "Harga_Satuan": 1000, "Qty": 1}]
+            Analisa gambar ini (Nota atau Bukti Transfer).
+            1. Jika NOTA: Ekstrak tiap barang (Nama_Barang, Harga_Satuan, Qty).
+            2. Jika TRANSFER/QRIS: Ekstrak Nama Toko/Penerima (Nama_Barang) dan Total (Harga_Satuan) dengan Qty 1.
+            Keluarkan format JSON Array saja: [{"Nama_Barang": "X", "Harga_Satuan": 1000, "Qty": 1}]
             """
             response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
             hasil_teks = response.text.replace('```json', '').replace('```', '').strip()
-            data = json.loads(hasil_teks)
-            return data
-        except Exception as e: 
-            st.error(f"Gagal baca AI: {str(e)}")
+            return json.loads(hasil_teks)
+        except Exception as e:
+            st.error(f"AI gagal membaca: {e}")
             return None
 
-# --- DASHBOARD ---
-st.title("Monitor Keuangan v4.3 🚀")
-total_masuk, total_keluar, saldo = hitung_ringkasan()
+# ==========================================
+# 2. TAMPILAN DASHBOARD
+# ==========================================
+st.title("Monitor Keuangan Pro v5.0 ☁️")
+st.caption("Data tersimpan otomatis di Google Sheets")
+
+df_current = ambil_data()
+
+# Pastikan kolom angka bertipe numerik agar bisa dijumlahkan
+if not df_current.empty:
+    df_current['Total_Harga'] = pd.to_numeric(df_current['Total_Harga'], errors='coerce').fillna(0)
+    masuk = df_current[df_current['Tipe'] == 'Uang Masuk']['Total_Harga'].sum()
+    keluar = df_current[df_current['Tipe'] == 'Uang Keluar']['Total_Harga'].sum()
+else:
+    masuk, keluar = 0, 0
+
 c1, c2, c3 = st.columns(3)
-c1.metric("Total Uang Masuk", f"Rp {total_masuk:,}")
-c2.metric("Total Uang Keluar", f"Rp {total_keluar:,}")
-c3.metric("Saldo Akhir", f"Rp {saldo:,}")
-st.markdown("---")
-
-# --- BACKUP ---
-col_down, col_up = st.columns(2)
-with col_down:
-    if os.path.exists(NAMA_FILE):
-        csv = pd.read_csv(NAMA_FILE).to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Backup", data=csv, file_name=f"backup_{date.today()}.csv", use_container_width=True)
-with col_up:
-    file_up = st.file_uploader("Upload Backup", type=['csv'], label_visibility="collapsed")
-    if file_up:
-        pd.read_csv(file_up).to_csv(NAMA_FILE, index=False)
-        st.rerun()
+c1.metric("Total Masuk", f"Rp {masuk:,.0f}")
+c2.metric("Total Keluar", f"Rp {keluar:,.0f}")
+c3.metric("Saldo", f"Rp {masuk - keluar:,.0f}")
 
 st.markdown("---")
 
-# --- INPUT ---
-metode = st.radio("Metode Pencatatan:", ["✍️ Manual", "📸 Scan AI"], horizontal=True)
+# ==========================================
+# 3. INPUT DATA (MANUAL & AI)
+# ==========================================
+metode = st.radio("Metode Input:", ["✍️ Manual", "📸 Scan AI"], horizontal=True)
 
 if metode == "✍️ Manual":
     col1, col2 = st.columns(2)
@@ -100,65 +84,75 @@ if metode == "✍️ Manual":
         opsi_kat = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe == "Uang Masuk" else ["Makan", "Belanja", "Transport", "Tagihan", "Transfer Keluar", "Lain-lain"]
         kat = st.selectbox("Kategori", opsi_kat)
     with col2:
-        nama = st.text_input("Subjek/Barang")
-        harga = st.number_input("Harga/Nominal", min_value=0, step=1000)
+        nama = st.text_input("Nama Barang / Subjek")
+        harga = st.number_input("Harga Satuan", min_value=0, step=1000)
         qty = 1 if tipe == "Uang Masuk" else st.number_input("Qty", min_value=1, step=1)
     
-    # OPSI CATATAN MANUAL
-    catatan_man = st.text_area("Catatan Detail (Opsional)", placeholder="Contoh: Bayar utang makan siang di warteg depan kantor.")
+    catatan = st.text_area("Catatan Tambahan")
     
-    if st.button("💾 Simpan Transaksi"):
+    if st.button("💾 Simpan ke Cloud"):
         if nama and harga > 0:
-            df = pd.DataFrame({"Tanggal": [tgl], "Tipe": [tipe], "Kategori": [kat], "Nama_Barang": [nama], "Harga_Satuan": [harga], "Qty": [qty], "Total_Harga": [harga * qty], "Catatan": [catatan_man]})
-            simpan_data_batch(df)
+            data_baru = pd.DataFrame([{
+                "Tanggal": str(tgl), "Tipe": tipe, "Kategori": kat, "Nama_Barang": nama,
+                "Harga_Satuan": harga, "Qty": qty, "Total_Harga": harga * qty, "Catatan": catatan
+            }])
+            df_update = pd.concat([df_current, data_baru], ignore_index=True)
+            conn.update(data=df_update)
+            st.success("Berhasil disimpan ke Google Sheets!")
             st.rerun()
 
 else:
-    upload = st.file_uploader("Upload Foto", type=['jpg', 'png', 'jpeg'])
+    upload = st.file_uploader("Upload Foto Nota/Transfer", type=['jpg', 'png', 'jpeg'])
     if upload:
         img = Image.open(upload)
         st.image(img, width=250)
         if st.button("🔍 Jalankan AI"):
-            st.session_state['scan_v43'] = analisa_dokumen_dengan_gemini(img)
-        
-        if 'scan_v43' in st.session_state:
-            c_tipe, c_kat = st.columns(2)
-            with c_tipe: tipe_s = st.radio("Tipe:", ["Uang Keluar", "Uang Masuk"], horizontal=True)
-            with c_kat: 
-                opsi_s = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe_s == "Uang Masuk" else ["Belanja", "Makan", "Transfer Keluar", "Lain-lain"]
-                kat_s = st.selectbox("Kategori:", opsi_s)
+            st.session_state['scan_res'] = analisa_ai(img)
             
-            df_s = pd.DataFrame(st.session_state['scan_v43'])
-            # Tampilkan editor tabel
-            edited = st.data_editor(df_s, num_rows="dynamic", hide_index=True, use_container_width=True)
+        if 'scan_res' in st.session_state:
+            t_scan = st.radio("Tipe Scan:", ["Uang Keluar", "Uang Masuk"], horizontal=True)
+            k_scan = st.selectbox("Kategori Scan:", ["Belanja", "Makan", "Transfer", "Lain-lain"])
             
-            # OPSI CATATAN UNTUK HASIL SCAN
-            catatan_scan = st.text_area("Tambahkan Catatan untuk Transaksi Ini:", placeholder="Misal: Uang patungan atau belanja bulanan rumah.")
+            df_edit = pd.DataFrame(st.session_state['scan_res'])
+            edited = st.data_editor(df_edit, num_rows="dynamic", hide_index=True)
+            c_scan = st.text_input("Catatan untuk hasil scan ini:")
             
             if st.button("💾 Simpan Hasil Scan"):
                 edited['Total_Harga'] = edited['Harga_Satuan'] * edited['Qty']
-                edited['Kategori'] = kat_s
-                edited['Tipe'] = tipe_s
-                edited['Tanggal'] = date.today()
-                edited['Catatan'] = catatan_scan # Memasukkan catatan dari text area ke semua baris scan
+                edited['Tanggal'] = str(date.today())
+                edited['Tipe'] = t_scan
+                edited['Kategori'] = k_scan
+                edited['Catatan'] = c_scan
                 
-                simpan_data_batch(edited)
-                st.session_state.pop('scan_v43', None)
+                df_update = pd.concat([df_current, edited], ignore_index=True)
+                conn.update(data=df_update)
+                st.session_state.pop('scan_res')
+                st.success("Data Scan berhasil masuk ke Google Sheets!")
                 st.rerun()
 
-# --- RIWAYAT TABS ---
-if os.path.exists(NAMA_FILE):
+# ==========================================
+# 4. RIWAYAT TABS (BULANAN)
+# ==========================================
+if not df_current.empty:
     st.markdown("---")
-    df_all = pd.read_csv(NAMA_FILE)
-    df_all['Tanggal'] = pd.to_datetime(df_all['Tanggal'])
-    df_all['Bulan'] = df_all['Tanggal'].dt.strftime('%B %Y')
-    bulans = df_all['Bulan'].unique()
+    st.subheader("Riwayat Transaksi (Google Sheets) 📅")
+    
+    df_current['Tanggal'] = pd.to_datetime(df_current['Tanggal'], errors='coerce')
+    df_current = df_current.dropna(subset=['Tanggal']) # Hapus baris yang tanggalnya rusak
+    df_current['Bulan'] = df_current['Tanggal'].dt.strftime('%B %Y')
+    bulans = df_current['Bulan'].unique()
     
     if len(bulans) > 0:
-        st.subheader("Riwayat Transaksi Bulanan 📅")
         tabs = st.tabs(list(bulans))
         for i, tab in enumerate(tabs):
             with tab:
-                df_f = df_all[df_all['Bulan'] == bulans[i]].drop(columns=['Bulan'])
+                df_f = df_current[df_current['Bulan'] == bulans[i]].drop(columns=['Bulan'])
                 df_f['Tanggal'] = df_f['Tanggal'].dt.strftime('%Y-%m-%d')
-                st.dataframe(df_f, use_container_width=True)
+                st.dataframe(df_f, use_container_width=True, hide_index=True)
+
+    if st.button("🗑️ Reset Semua Data (Hapus Sheet)"):
+        # Cara reset paling aman: kirim DataFrame kosong ke Google Sheets
+        df_reset = pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
+        conn.update(data=df_reset)
+        st.warning("Data di Google Sheets telah dikosongkan.")
+        st.rerun()
