@@ -30,43 +30,44 @@ def hitung_ringkasan():
     return (0, 0, 0)
 
 def simpan_data_batch(df_baru):
+    # Kolom standar 8 sesuai rancanganmu
     kolom_standar = ['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan']
+    
+    # Pastikan semua kolom ada, jika tidak ada isi dengan default
+    for col in kolom_standar:
+        if col not in df_baru.columns:
+            df_baru[col] = "" if col == 'Catatan' or col == 'Nama_Barang' else 0
+            
     df_baru = df_baru[kolom_standar]
+    
     if not os.path.exists(NAMA_FILE):
         df_baru.to_csv(NAMA_FILE, index=False)
     else:
         df_baru.to_csv(NAMA_FILE, mode='a', header=False, index=False)
 
-# --- FUNGSI AI HYBRID (PINTAR & ADAPTIF) ---
 def analisa_dokumen_dengan_gemini(gambar):
-    with st.spinner("AI sedang mengenali dokumen..."):
+    with st.spinner("AI sedang membaca dokumen..."):
         try:
             instruksi = """
-            Tolong analisa gambar ini. Ini bisa berupa NOTA BELANJA atau BUKTI TRANSFER/QRIS.
+            Analisa gambar ini (nota/transfer). 
+            Ekstrak ke JSON:
+            1. Nama pengirim/penerima/toko -> 'Nama_Barang'
+            2. Harga Satuan -> 'Harga_Satuan'
+            3. Jumlah -> 'Qty' (default 1 jika bukti transfer)
             
-            ATURAN EKSTRAKSI:
-            1. Jika ini NOTA BELANJA (ada daftar barang): Ekstrak setiap barang yang dibeli (Nama Barang, Harga Satuan, dan Qty).
-            2. Jika ini BUKTI TRANSFER / QRIS: Ekstrak Nama Penerima/Toko (sebagai Nama_Barang) dan TOTAL NOMINAL (sebagai Harga_Satuan) dengan Qty 1.
-            
-            Keluarkan hasil HANYA dalam format JSON Array mentah:
-            [{"Nama_Barang": "Contoh", "Harga_Satuan": 1000, "Qty": 1}]
+            Berikan format JSON Array saja:
+            [{"Nama_Barang": "X", "Harga_Satuan": 1000, "Qty": 1}]
             """
             response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
             hasil_teks = response.text.replace('```json', '').replace('```', '').strip()
-            
             data = json.loads(hasil_teks)
-            # Pastikan setiap item punya kolom Catatan kosong agar tidak error saat edit tabel
-            for item in data:
-                if "Catatan" not in item:
-                    item["Catatan"] = ""
             return data
         except Exception as e: 
-            st.error(f"Terjadi kendala: {str(e)}")
+            st.error(f"Gagal baca AI: {str(e)}")
             return None
 
-# --- TAMPILAN UTAMA ---
-st.title("Monitor Keuangan v4.2 🚀")
-
+# --- DASHBOARD ---
+st.title("Monitor Keuangan v4.3 🚀")
 total_masuk, total_keluar, saldo = hitung_ringkasan()
 c1, c2, c3 = st.columns(3)
 c1.metric("Total Uang Masuk", f"Rp {total_masuk:,}")
@@ -74,15 +75,12 @@ c2.metric("Total Uang Keluar", f"Rp {total_keluar:,}")
 c3.metric("Saldo Akhir", f"Rp {saldo:,}")
 st.markdown("---")
 
-# --- AREA BACKUP ---
+# --- BACKUP ---
 col_down, col_up = st.columns(2)
 with col_down:
     if os.path.exists(NAMA_FILE):
-        df_dl = pd.read_csv(NAMA_FILE)
-        csv = df_dl.to_csv(index=False).encode('utf-8')
+        csv = pd.read_csv(NAMA_FILE).to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Backup", data=csv, file_name=f"backup_{date.today()}.csv", use_container_width=True)
-    else:
-        st.download_button("📥 Download Backup (Kosong)", data="", disabled=True, use_container_width=True)
 with col_up:
     file_up = st.file_uploader("Upload Backup", type=['csv'], label_visibility="collapsed")
     if file_up:
@@ -91,7 +89,7 @@ with col_up:
 
 st.markdown("---")
 
-# --- INPUT TRANSAKSI ---
+# --- INPUT ---
 metode = st.radio("Metode Pencatatan:", ["✍️ Manual", "📸 Scan AI"], horizontal=True)
 
 if metode == "✍️ Manual":
@@ -99,55 +97,56 @@ if metode == "✍️ Manual":
     with col1:
         tgl = st.date_input("Tanggal", date.today())
         tipe = st.radio("Tipe", ["Uang Keluar", "Uang Masuk"], horizontal=True)
-        opsi_kat = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe == "Uang Masuk" else ["Makan", "Transport", "Belanja", "Tagihan", "Transfer Keluar", "Lain-lain"]
+        opsi_kat = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe == "Uang Masuk" else ["Makan", "Belanja", "Transport", "Tagihan", "Transfer Keluar", "Lain-lain"]
         kat = st.selectbox("Kategori", opsi_kat)
     with col2:
-        nama = st.text_input("Nama/Subjek")
+        nama = st.text_input("Subjek/Barang")
         harga = st.number_input("Harga/Nominal", min_value=0, step=1000)
         qty = 1 if tipe == "Uang Masuk" else st.number_input("Qty", min_value=1, step=1)
     
-    catatan_man = st.text_input("Catatan Tambahan (Opsional)")
+    # OPSI CATATAN MANUAL
+    catatan_man = st.text_area("Catatan Detail (Opsional)", placeholder="Contoh: Bayar utang makan siang di warteg depan kantor.")
     
-    if st.button("💾 Simpan Manual"):
+    if st.button("💾 Simpan Transaksi"):
         if nama and harga > 0:
             df = pd.DataFrame({"Tanggal": [tgl], "Tipe": [tipe], "Kategori": [kat], "Nama_Barang": [nama], "Harga_Satuan": [harga], "Qty": [qty], "Total_Harga": [harga * qty], "Catatan": [catatan_man]})
             simpan_data_batch(df)
             st.rerun()
 
 else:
-    upload = st.file_uploader("Upload Nota / Bukti Transfer", type=['jpg', 'jpeg', 'png'])
+    upload = st.file_uploader("Upload Foto", type=['jpg', 'png', 'jpeg'])
     if upload:
         img = Image.open(upload)
         st.image(img, width=250)
         if st.button("🔍 Jalankan AI"):
-            hasil = analisa_dokumen_dengan_gemini(img)
-            if hasil: st.session_state['scan_v4'] = hasil
+            st.session_state['scan_v43'] = analisa_dokumen_dengan_gemini(img)
         
-        if 'scan_v4' in st.session_state:
-            col_t, col_k = st.columns(2)
-            with col_t:
-                tipe_s = st.radio("Tipe:", ["Uang Keluar", "Uang Masuk"], horizontal=True)
-            with col_k:
-                opsi_s = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe_s == "Uang Masuk" else ["Belanja", "Makan", "Transfer Keluar", "Tagihan", "Lain-lain"]
+        if 'scan_v43' in st.session_state:
+            c_tipe, c_kat = st.columns(2)
+            with c_tipe: tipe_s = st.radio("Tipe:", ["Uang Keluar", "Uang Masuk"], horizontal=True)
+            with c_kat: 
+                opsi_s = ["Gaji", "Transfer Masuk", "Lain-lain"] if tipe_s == "Uang Masuk" else ["Belanja", "Makan", "Transfer Keluar", "Lain-lain"]
                 kat_s = st.selectbox("Kategori:", opsi_s)
             
-            df_s = pd.DataFrame(st.session_state['scan_v4'])
-            # Pastikan kolom Total_Harga dihitung di tabel editor
-            if 'Harga_Satuan' in df_s.columns and 'Qty' in df_s.columns:
-                df_s['Total_Harga'] = df_s['Harga_Satuan'] * df_s['Qty']
-            
+            df_s = pd.DataFrame(st.session_state['scan_v43'])
+            # Tampilkan editor tabel
             edited = st.data_editor(df_s, num_rows="dynamic", hide_index=True, use_container_width=True)
+            
+            # OPSI CATATAN UNTUK HASIL SCAN
+            catatan_scan = st.text_area("Tambahkan Catatan untuk Transaksi Ini:", placeholder="Misal: Uang patungan atau belanja bulanan rumah.")
             
             if st.button("💾 Simpan Hasil Scan"):
                 edited['Total_Harga'] = edited['Harga_Satuan'] * edited['Qty']
-                edited.insert(0, 'Kategori', kat_s)
-                edited.insert(0, 'Tipe', tipe_s)
-                edited.insert(0, 'Tanggal', date.today())
+                edited['Kategori'] = kat_s
+                edited['Tipe'] = tipe_s
+                edited['Tanggal'] = date.today()
+                edited['Catatan'] = catatan_scan # Memasukkan catatan dari text area ke semua baris scan
+                
                 simpan_data_batch(edited)
-                st.session_state.pop('scan_v4', None)
+                st.session_state.pop('scan_v43', None)
                 st.rerun()
 
-# --- TAMPILAN TAB BULAN ---
+# --- RIWAYAT TABS ---
 if os.path.exists(NAMA_FILE):
     st.markdown("---")
     df_all = pd.read_csv(NAMA_FILE)
@@ -156,7 +155,7 @@ if os.path.exists(NAMA_FILE):
     bulans = df_all['Bulan'].unique()
     
     if len(bulans) > 0:
-        st.subheader("Buku Kas Bulanan")
+        st.subheader("Riwayat Transaksi Bulanan 📅")
         tabs = st.tabs(list(bulans))
         for i, tab in enumerate(tabs):
             with tab:
