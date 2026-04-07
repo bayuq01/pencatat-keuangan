@@ -39,36 +39,53 @@ def simpan_data_batch(df_baru):
     else:
         df_baru.to_csv(NAMA_FILE, mode='a', header=False, index=False)
 
+# --- FUNGSI AI TERBARU (DENGAN DEBUGER) ---
 def analisa_dokumen_dengan_gemini(gambar):
-    try:
-        # LOGIKA BARU: Sangat Sederhana
-        instruksi = """
-        Ekstrak info dari gambar ini (nota/bukti transfer/QRIS).
-        Cari 2 hal saja:
-        1. Nama pengirim / penerima / nama toko (Masukkan ke Nama_Barang)
-        2. Total nominal uang (Masukkan ke Harga_Satuan)
-        
-        Keluarkan HANYA dalam format JSON Array ini:
-        [{"Nama_Barang": "Nama Disini", "Harga_Satuan": 50000}]
-        """
-        response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
-        hasil_teks = response.text.replace('```json', '').replace('```', '').strip()
-        data = json.loads(hasil_teks)
-        
-        # Otomatis menambahkan Qty=1 dan Catatan kosong untuk disesuaikan pengguna
-        for item in data:
-            item["Qty"] = 1
-            item["Catatan"] = ""
+    # Beri tahu pengguna di layar kalau proses sedang berjalan
+    with st.spinner("AI sedang membaca nota... mohon tunggu..."):
+        try:
+            # PROMPT LEBIH TEGAS: Fokus ambil Total Akhir
+            instruksi = """
+            Tolong analisa gambar ini (nota belanja/bukti transfer/QRIS).
+            Aturan:
+            1. Temukan nama penerima/nama toko (Masukkan ke 'Nama_Barang').
+            2. Temukan TOTAL NOMINAL AKHIR (Grand Total) yang harus dibayar (Masukkan ke 'Harga_Satuan'). Jangan ambil harga per item.
             
-        if len(data) > 0 and "Harga_Satuan" in data[0]:
+            Keluarkan HANYA dalam format JSON Array mentah seperti contoh ini:
+            [{"Nama_Barang": "Nama Toko / Pengirim", "Harga_Satuan": 50000}]
+            """
+            response = client.models.generate_content(model='gemini-2.5-flash', contents=[instruksi, gambar])
+            hasil_teks = response.text.replace('```json', '').replace('```', '').strip()
+            
+            # 1. CEK HASIL KOSONG
+            if not hasil_teks:
+                st.error("Gagal analisa: AI tidak mengembalikan teks sama sekali. Mungkin API Google sedang down atau gambar tidak jelas.")
+                return None
+
+            # 2. TAMPILKAN HASIL MENTAH UNTUK DEBUGGING (PENTING!)
+            st.write("**Debugging: Teks Mentah dari AI:**")
+            st.code(hasil_teks, language='json')
+            
+            # 3. ATTEMPT PARSING JSON
+            try:
+                data = json.loads(hasil_teks)
+            except json.JSONDecodeError:
+                st.error("Gagal analisa: AI mengembalikan teks yang bukan format JSON. Mungkin AI-nya sedang bingung membaca dokumen.")
+                return None
+            
+            # Otomatis menambahkan Qty=1 dan Catatan kosong
+            for item in data:
+                item["Qty"] = 1
+                item["Catatan"] = ""
+                
             return data
-        else:
-            return [{"Nama_Barang": "", "Harga_Satuan": 0, "Qty": 1, "Catatan": ""}]
-    except: 
-        return [{"Nama_Barang": "Gagal dibaca AI", "Harga_Satuan": 0, "Qty": 1, "Catatan": ""}]
+        except Exception as e: 
+            # Menangkap error asli dari API call
+            st.error(f"Gagal analisa: Terjadi kesalahan teknis saat menghubungi AI. Error: {str(e)}")
+            return None
 
 # --- TAMPILAN UTAMA (DASHBOARD) ---
-st.title("Monitor Keuangan v4.0 📊")
+st.title("Monitor Keuangan v4.1 Debugger 📊")
 
 total_masuk, total_keluar, saldo = hitung_ringkasan()
 c1, c2, c3 = st.columns(3)
@@ -139,8 +156,12 @@ else:
         img = Image.open(upload)
         st.image(img, width=250)
         if st.button("🔍 Mulai Analisa AI"):
+            # Panggil fungsi analisa baru yang punya debugar
             hasil = analisa_dokumen_dengan_gemini(img)
-            st.session_state['scan'] = hasil
+            
+            # Cek apakah analisa sukses mengembalikan data
+            if hasil is not None:
+                st.session_state['scan'] = hasil
         
         if 'scan' in st.session_state:
             st.info("💡 Pilih Tipe & Kategori. Kamu bisa mengedit Nama, Harga, atau menambahkan Catatan langsung di dalam tabel bawah ini.")
@@ -169,32 +190,20 @@ else:
                 except Exception as e:
                     st.error("Gagal menyimpan! Pastikan angka tidak kosong.")
 
-# --- TAMPILAN DATA BAWAH (VISUAL TABS PER BULAN) ---
+# --- TAMPILAN DATA BAWAH ---
 if os.path.exists(NAMA_FILE):
     st.markdown("---")
     st.subheader("Buku Kas Bulanan 📅")
     df_tampil = pd.read_csv(NAMA_FILE)
-    
-    # Memastikan kolom Tanggal terbaca sebagai format Waktu
     df_tampil['Tanggal'] = pd.to_datetime(df_tampil['Tanggal'])
-    
-    # Membuat kolom baru khusus untuk nama Bulan & Tahun (Contoh: "April 2026")
     df_tampil['Bulan_Tahun'] = df_tampil['Tanggal'].dt.strftime('%B %Y')
-    
-    # Mengambil daftar bulan apa saja yang ada di catatan
     daftar_bulan = df_tampil['Bulan_Tahun'].unique()
     
     if len(daftar_bulan) > 0:
-        # Membuat Tab (Visual Sheet) otomatis
         tabs = st.tabs(list(daftar_bulan))
-        
-        # Mengisi setiap Tab dengan data yang sesuai bulannya
         for i, tab in enumerate(tabs):
             with tab:
                 df_filter = df_tampil[df_tampil['Bulan_Tahun'] == daftar_bulan[i]]
-                # Sembunyikan kolom bantuan Bulan_Tahun agar rapi
                 df_bersih = df_filter.drop(columns=['Bulan_Tahun'])
-                # Mengubah format tanggal kembali ke tulisan rapi (YYYY-MM-DD)
                 df_bersih['Tanggal'] = df_bersih['Tanggal'].dt.strftime('%Y-%m-%d')
-                
                 st.dataframe(df_bersih, use_container_width=True)
