@@ -31,50 +31,35 @@ def ambil_data_fresh():
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
 # ==========================================
-# 2. FUNGSI ANALISA AI (MODE DETEKTIF)
+# 2. FUNGSI ANALISA AI (FINAL CLEAN)
 # ==========================================
 def analisa_ai_dokumen(gambar):
-    with st.spinner("AI sedang membaca nota... (Mencari server)"):
-        daftar_model = [
-            'gemini-1.5-flash-8b',       
-            'gemini-1.5-flash-latest',   
-            'gemini-1.5-flash',          
-            'gemini-2.0-flash'           
-        ]
-        
-        instruksi = """
-        Analisa gambar nota/transfer ini. 
-        Ambil data: Nama Barang/Toko, Harga Satuan, dan Qty.
-        JIKA BUKTI TRANSFER: Nama Barang = Nama Penerima, Qty = 1.
-        BERIKAN HASIL HANYA DALAM FORMAT JSON ARRAY:
-        [{"Nama_Barang": "Contoh", "Harga_Satuan": 1000, "Qty": 1}]
-        JANGAN ADA TEKS TAMBAHAN.
-        """
-        
-        # Tempat penampung log error
-        pesan_error_log = "### 🕵️ Log Error Detektif:\n"
-        
-        for nama_model in daftar_model:
-            try:
-                response = client.models.generate_content(model=nama_model, contents=[instruksi, gambar])
-                teks_hasil = response.text.strip()
-                
-                if "```json" in teks_hasil:
-                    teks_hasil = teks_hasil.split("```json")[1].split("```")[0]
-                elif "```" in teks_hasil:
-                    teks_hasil = teks_hasil.split("```")[1].split("```")[0]
-                
-                return json.loads(teks_hasil.strip())
-                
-            except Exception as e:
-                # Rekam pesan error aslinya agar tampil di layar
-                pesan_error_log += f"- **{nama_model}**: `{str(e)}`\n"
-                continue 
-        
-        # Jika semua gagal, tampilkan semua dosa-dosanya di layar!
-        st.error("❌ Semua model gagal! Tolong copy tulisan di bawah ini dan kirim ke aku:")
-        st.info(pesan_error_log)
-        return None
+    with st.spinner("AI sedang membaca nota..."):
+        try:
+            # Kita fokus ke model terbaru karena API Key barumu pasti mendukung ini
+            MODEL_AI = 'gemini-2.0-flash'
+            
+            instruksi = """
+            Analisa gambar nota/transfer ini. 
+            Ambil data: Nama Barang/Toko, Harga Satuan, dan Qty.
+            JIKA BUKTI TRANSFER: Nama Barang = Nama Penerima, Qty = 1.
+            BERIKAN HASIL HANYA DALAM FORMAT JSON ARRAY:
+            [{"Nama_Barang": "Contoh", "Harga_Satuan": 1000, "Qty": 1}]
+            JANGAN ADA TEKS TAMBAHAN.
+            """
+            
+            response = client.models.generate_content(model=MODEL_AI, contents=[instruksi, gambar])
+            teks_hasil = response.text.strip()
+            
+            if "```json" in teks_hasil:
+                teks_hasil = teks_hasil.split("```json")[1].split("```")[0]
+            elif "```" in teks_hasil:
+                teks_hasil = teks_hasil.split("```")[1].split("```")[0]
+            
+            return json.loads(teks_hasil.strip())
+        except Exception as e:
+            st.error(f"❌ Terjadi kesalahan pembacaan: {str(e)}")
+            return None
 
 # ==========================================
 # 3. TAMPILAN DASHBOARD
