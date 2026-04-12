@@ -37,7 +37,7 @@ def analisa_ai(gambar):
         try:
             # Gunakan nama model yang paling standar
             # Jika 1.5-flash tetap 404, ganti menjadi 'gemini-2.0-flash'
-            MODEL_NAME = 'gemini-1.5-flash' 
+           MODEL_NAME = 'gemini-2.0-flash' 
             
             instruksi = """
             Tolong analisa gambar ini (Nota atau Bukti Transfer).
