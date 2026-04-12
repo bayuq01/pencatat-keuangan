@@ -31,39 +31,55 @@ def ambil_data_fresh():
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
 # ==========================================
-# 2. FUNGSI ANALISA AI
+# 2. FUNGSI ANALISA AI (AUTO-FALLBACK)
 # ==========================================
 def analisa_ai_dokumen(gambar):
-    with st.spinner("AI sedang membaca nota..."):
-        try:
-            # Gunakan 1.5-flash agar jatah quota lebih banyak (Gratis & Stabil)
-            MODEL_AI = 'gemini-1.5-flash'
-            
-            instruksi = """
-            Analisa gambar nota/transfer ini. 
-            Ambil data: Nama Barang/Toko, Harga Satuan, dan Qty.
-            JIKA BUKTI TRANSFER: Nama Barang = Nama Penerima, Qty = 1.
-            BERIKAN HASIL HANYA DALAM FORMAT JSON ARRAY:
-            [{"Nama_Barang": "Contoh", "Harga_Satuan": 1000, "Qty": 1}]
-            JANGAN ADA TEKS TAMBAHAN.
-            """
-            
-            response = client.models.generate_content(model=MODEL_AI, contents=[instruksi, gambar])
-            teks_hasil = response.text.strip()
-            
-            # Pembersihan format JSON
-            if "```json" in teks_hasil:
-                teks_hasil = teks_hasil.split("```json")[1].split("```")[0]
-            elif "```" in teks_hasil:
-                teks_hasil = teks_hasil.split("```")[1].split("```")[0]
-            
-            return json.loads(teks_hasil.strip())
-        except Exception as e:
-            if "429" in str(e):
-                st.error("❌ Jatah harian AI habis (Quota Limit). Silakan coba lagi nanti atau besok.")
-            else:
-                st.error(f"❌ Terjadi kesalahan: {e}")
-            return None
+    with st.spinner("AI sedang membaca nota... (Mencari server terbaik)"):
+        # Daftar model AI: dari yang jatahnya paling banyak sampai yang tercanggih
+        daftar_model = [
+            'gemini-1.5-flash-8b',       # Opsi 1: Paling ringan, kuota melimpah
+            'gemini-1.5-flash-latest',   # Opsi 2: Versi update terbaru 1.5
+            'gemini-1.5-flash',          # Opsi 3: Versi standar 1.5
+            'gemini-2.0-flash'           # Opsi 4: Versi terbaru (jatah ketat)
+        ]
+        
+        instruksi = """
+        Analisa gambar nota/transfer ini. 
+        Ambil data: Nama Barang/Toko, Harga Satuan, dan Qty.
+        JIKA BUKTI TRANSFER: Nama Barang = Nama Penerima, Qty = 1.
+        BERIKAN HASIL HANYA DALAM FORMAT JSON ARRAY:
+        [{"Nama_Barang": "Contoh", "Harga_Satuan": 1000, "Qty": 1}]
+        JANGAN ADA TEKS TAMBAHAN.
+        """
+        
+        for nama_model in daftar_model:
+            try:
+                # Mencoba memanggil AI dengan model yang sedang di-loop
+                response = client.models.generate_content(model=nama_model, contents=[instruksi, gambar])
+                teks_hasil = response.text.strip()
+                
+                # Pembersihan format JSON (Cleaner)
+                if "```json" in teks_hasil:
+                    teks_hasil = teks_hasil.split("```json")[1].split("```")[0]
+                elif "```" in teks_hasil:
+                    teks_hasil = teks_hasil.split("```")[1].split("```")[0]
+                
+                # Jika sukses, langsung kembalikan datanya dan hentikan pencarian
+                return json.loads(teks_hasil.strip())
+                
+            except Exception as e:
+                error_msg = str(e)
+                # Jika error 404 (gak ketemu) atau 429 (kuota habis), lanjut ke model berikutnya!
+                if "404" in error_msg or "429" in error_msg:
+                    continue 
+                else:
+                    # Kalau errornya karena hal lain (misal koneksi putus), tampilkan pesannya
+                    st.error(f"❌ Gagal saat menggunakan {nama_model}: {error_msg}")
+                    return None
+        
+        # Jika kode sampai di sini, artinya ke-4 model di atas gagal semua
+        st.error("❌ Semua server AI sedang penuh atau jatah harianmu benar-benar habis. Coba lagi nanti.")
+        return None
 
 # ==========================================
 # 3. TAMPILAN DASHBOARD
