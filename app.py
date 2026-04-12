@@ -31,13 +31,12 @@ def ambil_data():
         # Jika sheet masih kosong, buat DataFrame baru dengan 8 kolom sesuai rancanganmu
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
-# --- FUNGSI AI TERBARU (FIX 404 & ANTI-GAGAL) ---
+# --- FUNGSI AI TERBARU (SUDAH DIPERBAIKI SPASINYA) ---
 def analisa_ai(gambar):
     with st.spinner("AI sedang mengenali dokumen..."):
         try:
-            # Gunakan nama model yang paling standar
-            # Jika 1.5-flash tetap 404, ganti menjadi 'gemini-2.0-flash'
-           MODEL_NAME = 'gemini-2.0-flash' 
+            # Menggunakan model terbaru gemini-2.0-flash
+            MODEL_NAME = 'gemini-2.0-flash' 
             
             instruksi = """
             Tolong analisa gambar ini (Nota atau Bukti Transfer).
@@ -70,13 +69,8 @@ def analisa_ai(gambar):
                 return None
                 
         except Exception as e:
-            # Jika masih error 404, kita beri saran otomatis di layar
-            if "404" in str(e):
-                st.error("⚠️ Model AI tidak ditemukan. Coba ganti MODEL_NAME di kode menjadi 'gemini-2.0-flash' atau 'gemini-1.5-flash-latest'.")
-            else:
-                st.error(f"Terjadi kendala teknis: {e}")
+            st.error(f"Terjadi kendala teknis: {e}")
             return None
-
 # ==========================================
 # 2. TAMPILAN DASHBOARD
 # ==========================================
