@@ -31,16 +31,15 @@ def ambil_data_fresh():
         return pd.DataFrame(columns=['Tanggal', 'Tipe', 'Kategori', 'Nama_Barang', 'Harga_Satuan', 'Qty', 'Total_Harga', 'Catatan'])
 
 # ==========================================
-# 2. FUNGSI ANALISA AI (AUTO-FALLBACK)
+# 2. FUNGSI ANALISA AI (MODE DETEKTIF)
 # ==========================================
 def analisa_ai_dokumen(gambar):
-    with st.spinner("AI sedang membaca nota... (Mencari server terbaik)"):
-        # Daftar model AI: dari yang jatahnya paling banyak sampai yang tercanggih
+    with st.spinner("AI sedang membaca nota... (Mencari server)"):
         daftar_model = [
-            'gemini-1.5-flash-8b',       # Opsi 1: Paling ringan, kuota melimpah
-            'gemini-1.5-flash-latest',   # Opsi 2: Versi update terbaru 1.5
-            'gemini-1.5-flash',          # Opsi 3: Versi standar 1.5
-            'gemini-2.0-flash'           # Opsi 4: Versi terbaru (jatah ketat)
+            'gemini-1.5-flash-8b',       
+            'gemini-1.5-flash-latest',   
+            'gemini-1.5-flash',          
+            'gemini-2.0-flash'           
         ]
         
         instruksi = """
@@ -52,33 +51,29 @@ def analisa_ai_dokumen(gambar):
         JANGAN ADA TEKS TAMBAHAN.
         """
         
+        # Tempat penampung log error
+        pesan_error_log = "### 🕵️ Log Error Detektif:\n"
+        
         for nama_model in daftar_model:
             try:
-                # Mencoba memanggil AI dengan model yang sedang di-loop
                 response = client.models.generate_content(model=nama_model, contents=[instruksi, gambar])
                 teks_hasil = response.text.strip()
                 
-                # Pembersihan format JSON (Cleaner)
                 if "```json" in teks_hasil:
                     teks_hasil = teks_hasil.split("```json")[1].split("```")[0]
                 elif "```" in teks_hasil:
                     teks_hasil = teks_hasil.split("```")[1].split("```")[0]
                 
-                # Jika sukses, langsung kembalikan datanya dan hentikan pencarian
                 return json.loads(teks_hasil.strip())
                 
             except Exception as e:
-                error_msg = str(e)
-                # Jika error 404 (gak ketemu) atau 429 (kuota habis), lanjut ke model berikutnya!
-                if "404" in error_msg or "429" in error_msg:
-                    continue 
-                else:
-                    # Kalau errornya karena hal lain (misal koneksi putus), tampilkan pesannya
-                    st.error(f"❌ Gagal saat menggunakan {nama_model}: {error_msg}")
-                    return None
+                # Rekam pesan error aslinya agar tampil di layar
+                pesan_error_log += f"- **{nama_model}**: `{str(e)}`\n"
+                continue 
         
-        # Jika kode sampai di sini, artinya ke-4 model di atas gagal semua
-        st.error("❌ Semua server AI sedang penuh atau jatah harianmu benar-benar habis. Coba lagi nanti.")
+        # Jika semua gagal, tampilkan semua dosa-dosanya di layar!
+        st.error("❌ Semua model gagal! Tolong copy tulisan di bawah ini dan kirim ke aku:")
+        st.info(pesan_error_log)
         return None
 
 # ==========================================
